@@ -21,8 +21,9 @@ import pandas as pd
 from pandas_datareader.data import DataReader
 from dimod import Integer, Binary
 from dimod import quicksum 
-from dimod import ConstrainedQuadraticModel, DiscreteQuadraticModel
-from dwave.system import LeapHybridDQMSampler, LeapHybridCQMSampler 
+from dimod import ConstrainedQuadraticModel, DiscreteQuadraticModel, BinaryQuadraticModel, cqm_to_bqm
+from dwave.system import LeapHybridDQMSampler, LeapHybridCQMSampler, EmbeddingComposite, DWaveSampler
+import dwave.inspector as inspector
 
 
 class SinglePeriod: 
@@ -89,7 +90,7 @@ class SinglePeriod:
         else:
             self.bin_size = 10
        
-        self.model = {'CQM': None, 'DQM': None}
+        self.model = {'CQM': None, 'DQM': None, 'QPU': None}
 
         self.sample_set = {}
         if sampler_args:
@@ -98,7 +99,8 @@ class SinglePeriod:
             self.sampler_args = {}
 
         self.sampler = {'CQM': LeapHybridCQMSampler(**self.sampler_args),
-                        'DQM': LeapHybridDQMSampler(**self.sampler_args)}
+                        'DQM': LeapHybridDQMSampler(**self.sampler_args),
+                        'QPU': EmbeddingComposite(DWaveSampler(**self.sampler_args, solver='Advantage_system4.1'))}
 
         self.solution = {}
 
@@ -272,6 +274,7 @@ class SinglePeriod:
             cqm.set_objective(self.alpha*risk - returns)
 
         cqm.substitute_self_loops()
+        # print("variables = {}".format(cqm.variables))
 
         self.model['CQM'] = cqm 
 
@@ -334,6 +337,32 @@ class SinglePeriod:
             print(f"Variance: {solution['risk']}\n")
 
             return solution 
+
+    def build_bqm(self, max_risk=None, min_return=None, init_holdings=None):
+        # Build the CQM 
+        self.build_cqm(max_risk=None, min_return=None, init_holdings=None)
+
+        # Convert the CQM to a BQM
+            # TODO: Tune the Lagrange multiplier 
+            #  Note that it might be best to build a BQM from scratch because the same
+            #    Lagrange parameter is applied to all constraints in cqm_to_bqm.
+            #    Typically different types of constraints will need a different Lagrange 
+            #    parameter
+        self.model['QPU'] = cqm_to_bqm(self.model['CQM'], lagrange_multiplier=None)[0]
+        print(f"Number of BQM variables: {self.model['QPU'].num_variables}")
+
+        # Normalize
+        self.model['QPU'].normalize()
+
+    def solve_qpu(self, max_risk=None, min_return=None, init_holdings=None):
+        self.build_bqm(max_risk, min_return, init_holdings)
+
+        self.sample_set['QPU'] = self.sampler['QPU'].sample(self.model['QPU'], num_reads=100, 
+                                                                label="Example - Portfolio Optimization - QPU")
+
+        inspector.show(self.sample_set['QPU'])
+        # print('inspect')
+
 
     def build_dqm(self, alpha=None, gamma=None):
         """Build DQM.  
@@ -503,6 +532,11 @@ class SinglePeriod:
             self.solution['CQM'] = self.solve_cqm(min_return=min_return, 
                                                   max_risk=max_risk, 
                                                   init_holdings=init_holdings)
+        elif self.model_type=='QPU':
+            print(f"\nQPU run...")
+            self.solution['QPU'] = self.solve_qpu(min_return=min_return, 
+                                                  max_risk=max_risk, 
+                                                  init_holdings=init_holdings)
         else:
             print(f"\nDQM run...")
             if len(self.alpha_list) > 1 or len(self.gamma_list) > 1:
@@ -511,3 +545,4 @@ class SinglePeriod:
 
             self.build_dqm()
             self.solution['DQM'] = self.solve_dqm()
+

@@ -42,8 +42,8 @@ from single_period import SinglePeriod
               help='Lower bound on the returns. This only works for CQM.')
 @click.option('-d', '--dates', nargs=2, type=str,
               help='Start and end date to query stock data from Yahoo! Finance')
-@click.option('-m', '--model-type', default='CQM', multiple=False, 
-              type=click.Choice(['CQM', 'DQM'], case_sensitive=False),
+@click.option('-m', '--model-type', default='QPU', multiple=False, 
+              type=click.Choice(['CQM', 'DQM', 'QPU'], case_sensitive=False),
               show_default=True, help='Model type, CQM or DQM')
 @click.option('-r', '--rebalance', is_flag=True, default=False,
               help='Make a multi-period rebalancing portfolio optimization run; '
